@@ -468,7 +468,7 @@ Alternatives: Any weather station with an API that provides ground-level tempera
 |---|---|---|---|
 | **Controller** | [OpenSprinkler 3.0 AC](https://opensprinkler.com/product/opensprinkler/) ([buy US](https://opensprinkler.com/product/opensprinkler/) / [buy EU](https://opensprinklershop.de/pl/product/opensprinkler-3-0/)) | ~€199 | 8 zones, expandable to 72. AC version for standard 24V AC solenoid valves |
 | **Zone expander** | [OpenSprinkler Zone Expander](https://opensprinkler.com/product/opensprinkler-zone-expander/) ([buy EU](https://opensprinklershop.de/pl/shop/)) | ~€45 | +8 zones per board |
-| **Sprinklers** | [NDJ Flipper](https://www.ndjplast.pl/) micro-sprinklers (43 L/h) | varies | 24 per zone, great for frost protection |
+| **Sprinklers** | [NDJ Flipper 43 L/h](https://plantexuk.com/products/ndj-flipper-sprinkler-for-frost-protection-black-43-l-h-9-mtr-strip-coverage) (NaanDanJain) | varies | 24 per zone, 9m strip coverage, designed for frost protection ([spec sheet](https://www.agriexpo.online/prod/naandan-jain-irrigation-systems-ltd/product-175543-56436.html)) |
 | **Pump** | Any pump matching your flow needs | varies | We use Omnigena 3T32 (60 L/min) + 200L buffer tank |
 | **Solenoid valves** | Hunter PGV-101 or similar 1" valves | ~€15 each | One per zone |
 
