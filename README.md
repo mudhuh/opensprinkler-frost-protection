@@ -454,9 +454,9 @@ The system uses [Ecowitt](https://www.ecowitt.com) weather stations with their f
 
 | Component | Product | ~Price | Purpose |
 |---|---|---|---|
-| **Weather station** | [Ecowitt WH2650A](https://shop.ecowitt.com/products/wh2650) or [HP2551](https://shop.ecowitt.com/products/hp2551) | ~€120 | Base station + outdoor temp/humidity/rain/wind |
-| **Ground sensor** ⚠️ | [Ecowitt WN30](https://shop.ecowitt.com/products/wn30) or [WN34L](https://shop.ecowitt.com/products/wn34l) (probe) | ~€15-25 | Ground-level temperature -- **this is the most important sensor** |
-| **Rain gauge** | Included with WH2650A, or [WH40](https://shop.ecowitt.com/products/wh40) separately | ~€20 | Rainfall tracking (skip lawn watering when it rains) |
+| **Weather station** | [Ecowitt WH2650A](https://www.ecowitt.com/shop/goodsDetail/19) or [HP2551](https://www.ecowitt.com/shop/goodsDetail/64) | ~€120 | Base station + outdoor temp/humidity/rain/wind |
+| **Ground sensor** ⚠️ | [Ecowitt WN30](https://www.ecowitt.com/shop/goodsDetail/20) or [WN34L](https://www.ecowitt.com/shop/goodsDetail/111) (probe with cable) | ~€15-25 | Ground-level temperature -- **this is the most important sensor** |
+| **Rain gauge** | Included with WH2650A, or [WH40](https://www.ecowitt.com/shop/goodsDetail/21) separately | ~€20 | Rainfall tracking (skip lawn watering when it rains) |
 
 **Important setup trick:** Configure the ground sensor as the **"indoor" channel** in Ecowitt. The Ecowitt API reports it under `indoor.temperature` -- the code reads this value for frost decisions. It's not actually indoors, but this is the simplest way to get a second temperature reading through the API.
 
@@ -466,8 +466,8 @@ Alternatives: Any weather station with an API that provides ground-level tempera
 
 | Component | What we use | ~Price | Notes |
 |---|---|---|---|
-| **Controller** | [OpenSprinkler 3.0](https://opensprinkler.com/product/opensprinkler/) | ~€140 | 8 zones, expandable to 72 |
-| **Zone expander** | [OpenSprinkler Zone Expander](https://opensprinkler.com/product/opensprinkler-zone-expander/) | ~€45 | +8 zones per board |
+| **Controller** | [OpenSprinkler 3.0 AC](https://opensprinkler.com/product/opensprinkler/) ([buy](https://opensprinkler.com/product/opensprinkler/)) | ~€140 | 8 zones, expandable to 72. We use the AC version for standard 24V AC solenoid valves |
+| **Zone expander** | [OpenSprinkler Zone Expander](https://opensprinkler.com/product/opensprinkler-zone-expander/) ([buy](https://opensprinkler.com/product/opensprinkler-zone-expander/)) | ~€45 | +8 zones per board |
 | **Sprinklers** | [NDJ Flipper](https://www.ndjplast.pl/) micro-sprinklers (43 L/h) | varies | 24 per zone, great for frost protection |
 | **Pump** | Any pump matching your flow needs | varies | We use Omnigena 3T32 (60 L/min) + 200L buffer tank |
 | **Solenoid valves** | Hunter PGV-101 or similar 1" valves | ~€15 each | One per zone |
