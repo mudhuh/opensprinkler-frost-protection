@@ -476,7 +476,7 @@ Alternatives: Any weather station with an API that provides ground-level tempera
 
 ## Built for Vineyards
 
-This system was originally built for [Winnica Pustkowie](https://winnicapustkowie.pl) (Pustkowie Vineyard, Poland) and is part of the [VineyardElf](https://vineyardelf.com) platform -- a suite of tools for vineyard monitoring and automation.
+This system was originally built for [Winnica Pustkowie](https://winnicapustkowie.pl) (Pustkowie Vineyard, Poland) and is part of the [VineyardElf](https://vineyardelf.com/en) platform -- a suite of tools for vineyard monitoring and automation.
 
 If you grow grapes (or any frost-sensitive crops) and want help setting this up, feel free to open an issue or reach out.
 
