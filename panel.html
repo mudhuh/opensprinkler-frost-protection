@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sprinkler Control Panel</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 16px; max-width: 500px; margin: 0 auto; }
+h1 { font-size: 1.3em; margin-bottom: 12px; color: #fff; }
+.status-bar { background: #16213e; border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+.status-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 0.9em; }
+.status-row .label { color: #888; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }
+.badge-frost { background: #0f3460; color: #4cc9f0; }
+.badge-lawn { background: #1b4332; color: #95d5b2; }
+.badge-on { background: #2d6a4f; color: #b7e4c7; }
+.badge-off { background: #3a0000; color: #e76f51; }
+.section { margin-bottom: 16px; }
+.section h2 { font-size: 1em; color: #aaa; margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 4px; }
+.btn { display: block; width: 100%; padding: 12px; margin-bottom: 8px; border: none; border-radius: 6px; font-size: 1em; cursor: pointer; font-weight: 600; transition: opacity 0.2s; }
+.btn:active { opacity: 0.7; }
+.btn-frost { background: #0f3460; color: #4cc9f0; }
+.btn-lawn { background: #1b4332; color: #95d5b2; }
+.btn-danger { background: #641220; color: #f4a261; }
+.btn-test { background: #2a2a4a; color: #ccc; }
+.btn-season { background: #3d2b1f; color: #e9c46a; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.zones { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 8px; }
+.zone { background: #16213e; border-radius: 6px; padding: 8px; text-align: center; font-size: 0.85em; }
+.zone.active { background: #2d6a4f; color: #b7e4c7; }
+#log { background: #0d1117; border-radius: 6px; padding: 8px; font-family: monospace; font-size: 0.8em; max-height: 200px; overflow-y: auto; white-space: pre-wrap; color: #7ee787; margin-top: 12px; }
+.token-input { display: flex; gap: 8px; margin-bottom: 16px; }
+.token-input input { flex: 1; background: #16213e; border: 1px solid #333; border-radius: 6px; padding: 8px; color: #e0e0e0; font-size: 0.9em; }
+</style>
+</head>
+<body>
+<h1>Sprinkler Control</h1>
+
+<div class="token-input">
+  <input type="password" id="token" placeholder="Panel token" />
+  <button class="btn btn-test" style="width:auto;padding:8px 16px" onclick="refreshStatus()">Refresh</button>
+</div>
+
+<div class="status-bar" id="statusBar">
+  <div class="status-row"><span class="label">Mode</span><span id="modeDisplay">&mdash;</span></div>
+  <div class="status-row"><span class="label">Frost loop</span><span id="loopDisplay">&mdash;</span></div>
+  <div class="status-row"><span class="label">Frost season</span><span id="seasonDisplay">&mdash;</span></div>
+  <div class="status-row"><span class="label">Active zones</span><span id="activeDisplay">&mdash;</span></div>
+</div>
+
+<div class="zones" id="zonesGrid"></div>
+
+<div class="section">
+  <h2>Mode</h2>
+  <button class="btn btn-frost" onclick="doAction('switchToFrost')">FROST mode</button>
+  <button class="btn btn-lawn" onclick="doAction('switchToLawn')">LAWN mode</button>
+</div>
+
+<div class="section">
+  <h2>Frost Protection</h2>
+  <button class="btn btn-frost" onclick="doAction('startFrostLoop')">Start frost loop</button>
+  <button class="btn btn-danger" onclick="doAction('stopAll')">STOP all</button>
+  <button class="btn btn-season" onclick="doAction('enableFrostSeason')">Enable season (override)</button>
+  <button class="btn btn-season" onclick="doAction('disableFrostSeason')">Disable season override</button>
+</div>
+
+<div class="section">
+  <h2>Lawn</h2>
+  <button class="btn btn-lawn" onclick="doAction('testLawn')">Run lawn watering</button>
+  <button class="btn btn-danger" onclick="doAction('stopLawn')">Stop lawn</button>
+</div>
+
+<div class="section">
+  <h2>Test zones (no auth)</h2>
+  <div style="display:flex;gap:8px;margin-bottom:8px">
+    <input type="text" id="testZones" placeholder="e.g. 1,2" value="1,2" style="flex:1;background:#16213e;border:1px solid #333;border-radius:6px;padding:8px;color:#e0e0e0">
+    <input type="number" id="testDuration" placeholder="sec" value="60" style="width:70px;background:#16213e;border:1px solid #333;border-radius:6px;padding:8px;color:#e0e0e0">
+  </div>
+  <button class="btn btn-test" onclick="doRunZones()">Run zones</button>
+  <button class="btn btn-danger" onclick="doStopZones()">Stop zones 1-10</button>
+</div>
+
+<div id="log">Ready.</div>
+
+<script>
+// IMPORTANT: Replace this URL with your deployed Google Apps Script web app URL
+const BASE = 'YOUR_DEPLOYED_WEB_APP_URL_HERE';
+
+function log(msg) {
+  const el = document.getElementById('log');
+  const ts = new Date().toLocaleTimeString();
+  el.textContent = `[${ts}] ${msg}\n` + el.textContent;
+}
+
+async function refreshStatus() {
+  log('Fetching status...');
+  try {
+    const r = await fetch(BASE + '?action=status');
+    const d = await r.json();
+    document.getElementById('modeDisplay').innerHTML =
+      d.mode === 'frost' ? '<span class="badge badge-frost">FROST</span>' : '<span class="badge badge-lawn">LAWN</span>';
+    document.getElementById('loopDisplay').innerHTML =
+      d.frostLoopActive ? '<span class="badge badge-on">ACTIVE</span>' : '<span class="badge badge-off">inactive</span>';
+    document.getElementById('seasonDisplay').innerHTML =
+      d.frostSeasonOverride ? '<span class="badge badge-on">OVERRIDE ON</span>' : '<span class="badge badge-off">calendar</span>';
+
+    const activeNames = (d.activeZones || []).map(z => z.name || 'S' + String(z.sid).padStart(2, '0'));
+    document.getElementById('activeDisplay').textContent = activeNames.length > 0 ? activeNames.join(', ') : 'none';
+
+    // Zones grid
+    const grid = document.getElementById('zonesGrid');
+    grid.innerHTML = '';
+    const total = d.totalZones || 8;
+    for (let i = 1; i <= Math.max(total, 8); i++) {
+      const isActive = (d.activeZones || []).some(z => z.sid === i);
+      const div = document.createElement('div');
+      div.className = 'zone' + (isActive ? ' active' : '');
+      div.textContent = 'S' + String(i).padStart(2, '0');
+      grid.appendChild(div);
+    }
+
+    log('Status OK: ' + d.mode + ', loop: ' + (d.frostLoopActive ? 'ON' : 'OFF'));
+  } catch (e) {
+    log('Error: ' + e.message);
+  }
+}
+
+async function doAction(action) {
+  const token = document.getElementById('token').value;
+  if (!token) { log('Enter token first!'); return; }
+  log(`Action: ${action}...`);
+  try {
+    const r = await fetch(BASE + `?action=${action}&token=${encodeURIComponent(token)}`);
+    const d = await r.json();
+    log(d.message || d.error || JSON.stringify(d));
+    setTimeout(refreshStatus, 2000);
+  } catch (e) {
+    log('Error: ' + e.message);
+  }
+}
+
+async function doRunZones() {
+  const zones = document.getElementById('testZones').value;
+  const duration = document.getElementById('testDuration').value;
+  log(`Starting zones ${zones} for ${duration}s...`);
+  try {
+    const r = await fetch(BASE + `?action=runZones&zones=${zones}&duration=${duration}`);
+    const d = await r.json();
+    const results = (d.results || []).map(r => `S${String(r.zone).padStart(2,'0')}: ${r.response || r.error}`).join(', ');
+    log(results);
+    setTimeout(refreshStatus, 2000);
+  } catch (e) {
+    log('Error: ' + e.message);
+  }
+}
+
+async function doStopZones() {
+  log('Stopping zones 1-10...');
+  try {
+    const r = await fetch(BASE + `?action=runZones&zones=1,2,3,4,5,6,7,8,9,10&duration=0`);
+    const d = await r.json();
+    log('Stop OK');
+    setTimeout(refreshStatus, 2000);
+  } catch (e) {
+    log('Error: ' + e.message);
+  }
+}
+
+// Auto-refresh
+refreshStatus();
+setInterval(refreshStatus, 30000);
+
+// Persist token in localStorage
+const savedToken = localStorage.getItem('sprinkler_panel_token');
+if (savedToken) document.getElementById('token').value = savedToken;
+document.getElementById('token').addEventListener('change', function() {
+  localStorage.setItem('sprinkler_panel_token', this.value);
+});
+</script>
+</body>
+</html>
