@@ -41,10 +41,7 @@ Ecowitt Weather Station ──── Ecowitt Cloud API v3
 ## Prerequisites
 
 1. **[OpenSprinkler](https://opensprinkler.com)** controller with cloud access enabled (cloud.openthings.io)
-2. **[Ecowitt](https://www.ecowitt.com)** weather station with:
-   - Outdoor temperature/humidity sensor
-   - A second sensor placed at ground level near your crops (configured as "indoor" channel in Ecowitt)
-   - Ecowitt API v3 access (free, request at ecowitt.net)
+2. **[Ecowitt](https://www.ecowitt.com)** weather station -- see [Recommended Hardware](#recommended-hardware) below
 3. **Google Account** for Apps Script and Sheets
 4. **Notification service** (at least one):
    - [Meta WhatsApp Business API](https://developers.facebook.com/docs/whatsapp/cloud-api) (free test number, no sandbox expiry)
@@ -448,6 +445,34 @@ clasp deploy --description "v1.0"
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
+
+## Recommended Hardware
+
+### Weather Station (Ecowitt)
+
+The system uses [Ecowitt](https://www.ecowitt.com) weather stations with their free Cloud API. The critical component is a **ground-level temperature sensor** -- air temperature at 2m height can be 2-3°C warmer than at ground level where frost actually kills buds.
+
+| Component | Product | ~Price | Purpose |
+|---|---|---|---|
+| **Weather station** | [Ecowitt WH2650A](https://shop.ecowitt.com/products/wh2650) or [HP2551](https://shop.ecowitt.com/products/hp2551) | ~€120 | Base station + outdoor temp/humidity/rain/wind |
+| **Ground sensor** ⚠️ | [Ecowitt WN30](https://shop.ecowitt.com/products/wn30) or [WN34L](https://shop.ecowitt.com/products/wn34l) (probe) | ~€15-25 | Ground-level temperature -- **this is the most important sensor** |
+| **Rain gauge** | Included with WH2650A, or [WH40](https://shop.ecowitt.com/products/wh40) separately | ~€20 | Rainfall tracking (skip lawn watering when it rains) |
+
+**Important setup trick:** Configure the ground sensor as the **"indoor" channel** in Ecowitt. The Ecowitt API reports it under `indoor.temperature` -- the code reads this value for frost decisions. It's not actually indoors, but this is the simplest way to get a second temperature reading through the API.
+
+Alternatives: Any weather station with an API that provides ground-level temperature will work -- you'll need to adapt `fetchWeatherData()` in the code.
+
+### Sprinklers & Controller
+
+| Component | What we use | ~Price | Notes |
+|---|---|---|---|
+| **Controller** | [OpenSprinkler 3.0](https://opensprinkler.com/product/opensprinkler/) | ~€140 | 8 zones, expandable to 72 |
+| **Zone expander** | [OpenSprinkler Zone Expander](https://opensprinkler.com/product/opensprinkler-zone-expander/) | ~€45 | +8 zones per board |
+| **Sprinklers** | [NDJ Flipper](https://www.ndjplast.pl/) micro-sprinklers (43 L/h) | varies | 24 per zone, great for frost protection |
+| **Pump** | Any pump matching your flow needs | varies | We use Omnigena 3T32 (60 L/min) + 200L buffer tank |
+| **Solenoid valves** | Hunter PGV-101 or similar 1" valves | ~€15 each | One per zone |
+
+**Total cost for our 6-zone vineyard setup: ~€2,750** (including pipes, fittings, and installation materials).
 
 ## Built for Vineyards
 
