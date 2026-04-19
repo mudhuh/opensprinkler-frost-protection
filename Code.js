@@ -2,7 +2,7 @@
 // OpenSprinkler Frost Protection & Lawn Irrigation System
 // Google Apps Script — controls OpenSprinkler via Cloud API
 // Weather data from Ecowitt API v3
-// Alerts via Twilio (WhatsApp + SMS) and/or SMSAPI.pl
+// Alerts via Meta WhatsApp Business API, Twilio (optional), and/or SMSAPI.pl
 // ============================================================
 
 // === CONFIGURATION — Frost thresholds and timings ===
@@ -695,62 +695,66 @@ function sendSMSAlert(message) {
   }
 }
 
-// Send notification via Twilio: WhatsApp -> Twilio SMS -> SMSAPI.pl (fallback chain)
+// Send notification: Meta WhatsApp -> SMSAPI SMS fallback
+// NOTIFICATION_TO: comma-separated phone numbers (e.g., "48123456789,48987654321")
 function sendNotification(message) {
-  const sid = PropertiesService.getScriptProperties().getProperty("TWILIO_SID");
-  const authToken = PropertiesService.getScriptProperties().getProperty("TWILIO_AUTH");
-  const to = PropertiesService.getScriptProperties().getProperty("TWILIO_TO");
-  if (!sid || !authToken || !to) {
-    Logger.log("Missing Twilio credentials. Falling back to SMSAPI.");
-    sendSMSAlert(message);
-    return;
-  }
-  const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
-  const authHeader = 'Basic ' + Utilities.base64Encode(sid + ':' + authToken);
-  const whatsappFrom = PropertiesService.getScriptProperties().getProperty("TWILIO_WHATSAPP_FROM") || 'whatsapp:+14155238886';
-  const smsFrom = PropertiesService.getScriptProperties().getProperty("TWILIO_SMS_FROM");
+  const waToken = PropertiesService.getScriptProperties().getProperty("META_WHATSAPP_TOKEN");
+  const waPhoneId = PropertiesService.getScriptProperties().getProperty("META_WHATSAPP_PHONE_ID");
+  const recipients = (PropertiesService.getScriptProperties().getProperty("NOTIFICATION_TO") || "").split(",").map(n => n.trim()).filter(n => n);
 
-  // Attempt 1: WhatsApp
-  try {
-    const waResp = UrlFetchApp.fetch(url, {
-      method: 'post',
-      headers: { 'Authorization': authHeader },
-      payload: { 'From': whatsappFrom, 'To': 'whatsapp:' + to, 'Body': message },
-      muteHttpExceptions: true
-    });
-    const waResult = JSON.parse(waResp.getContentText());
-    if (!waResult.error_code && waResult.status !== 'failed') {
-      Logger.log(`WhatsApp OK: "${message}". SID: ${waResult.sid}`);
-      return;
-    }
-    Logger.log(`WhatsApp failed (${waResult.error_code}). Trying Twilio SMS.`);
-  } catch (e) {
-    Logger.log("WhatsApp error: " + e + ". Trying Twilio SMS.");
-  }
-
-  // Attempt 2: SMS via Twilio
-  if (smsFrom) {
-    try {
-      const smsResp = UrlFetchApp.fetch(url, {
-        method: 'post',
-        headers: { 'Authorization': authHeader },
-        payload: { 'From': smsFrom, 'To': to, 'Body': message },
-        muteHttpExceptions: true
-      });
-      const smsResult = JSON.parse(smsResp.getContentText());
-      if (!smsResult.error_code && smsResult.status !== 'failed') {
-        Logger.log(`Twilio SMS OK: "${message}". SID: ${smsResult.sid}`);
-        return;
+  // Attempt 1: Meta WhatsApp Business API
+  if (waToken && waPhoneId && recipients.length > 0) {
+    let allOk = true;
+    for (const to of recipients) {
+      try {
+        const waResp = UrlFetchApp.fetch(`https://graph.facebook.com/v25.0/${waPhoneId}/messages`, {
+          method: 'post',
+          headers: { 'Authorization': 'Bearer ' + waToken, 'Content-Type': 'application/json' },
+          payload: JSON.stringify({ messaging_product: 'whatsapp', to: to, type: 'text', text: { body: message } }),
+          muteHttpExceptions: true
+        });
+        const waResult = JSON.parse(waResp.getContentText());
+        if (waResult.messages && waResult.messages[0]) {
+          Logger.log(`WhatsApp OK (${to}): ID ${waResult.messages[0].id}`);
+        } else {
+          Logger.log(`WhatsApp failed (${to}): ${waResp.getContentText().substring(0, 200)}`);
+          allOk = false;
+        }
+      } catch (e) {
+        Logger.log(`WhatsApp error (${to}): ${e}`);
+        allOk = false;
       }
-      Logger.log(`Twilio SMS failed (${smsResult.error_code}). Falling back to SMSAPI.`);
-    } catch (e) {
-      Logger.log("Twilio SMS error: " + e + ". Falling back to SMSAPI.");
     }
+    if (allOk) return;
+    Logger.log("Not all WhatsApp messages delivered. Falling back to SMSAPI.");
+  } else {
+    Logger.log("Missing META_WHATSAPP_TOKEN or NOTIFICATION_TO. Falling back to SMSAPI.");
   }
 
-  // Attempt 3: SMSAPI.pl (last resort)
+  // Attempt 2: SMSAPI.pl SMS
   sendSMSAlert(message);
 }
+
+// Alternative: Send notification via Twilio (WhatsApp sandbox + SMS)
+// Uncomment and use this instead of sendNotification() if you prefer Twilio
+// function sendNotificationTwilio(message) {
+//   const sid = PropertiesService.getScriptProperties().getProperty("TWILIO_SID");
+//   const authToken = PropertiesService.getScriptProperties().getProperty("TWILIO_AUTH");
+//   const to = PropertiesService.getScriptProperties().getProperty("TWILIO_TO");
+//   if (!sid || !authToken || !to) { sendSMSAlert(message); return; }
+//   const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
+//   const authHeader = 'Basic ' + Utilities.base64Encode(sid + ':' + authToken);
+//   try {
+//     const resp = UrlFetchApp.fetch(url, {
+//       method: 'post', headers: { 'Authorization': authHeader },
+//       payload: { 'From': 'whatsapp:+14155238886', 'To': 'whatsapp:' + to, 'Body': message },
+//       muteHttpExceptions: true
+//     });
+//     const result = JSON.parse(resp.getContentText());
+//     if (!result.error_code) { Logger.log(`Twilio WhatsApp OK: ${result.sid}`); return; }
+//   } catch (e) { Logger.log("Twilio error: " + e); }
+//   sendSMSAlert(message);
+// }
 
 
 // ============================================================
