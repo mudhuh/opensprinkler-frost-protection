@@ -466,8 +466,8 @@ Alternatives: Any weather station with an API that provides ground-level tempera
 
 | Component | What we use | ~Price | Notes |
 |---|---|---|---|
-| **Controller** | [OpenSprinkler 3.0 AC](https://opensprinkler.com/product/opensprinkler/) ([buy](https://opensprinkler.com/product/opensprinkler/)) | ~€140 | 8 zones, expandable to 72. We use the AC version for standard 24V AC solenoid valves |
-| **Zone expander** | [OpenSprinkler Zone Expander](https://opensprinkler.com/product/opensprinkler-zone-expander/) ([buy](https://opensprinkler.com/product/opensprinkler-zone-expander/)) | ~€45 | +8 zones per board |
+| **Controller** | [OpenSprinkler 3.0 AC](https://opensprinkler.com/product/opensprinkler/) ([buy US](https://opensprinkler.com/product/opensprinkler/) / [buy EU](https://opensprinklershop.de/pl/product/opensprinkler-3-0/)) | ~€199 | 8 zones, expandable to 72. AC version for standard 24V AC solenoid valves |
+| **Zone expander** | [OpenSprinkler Zone Expander](https://opensprinkler.com/product/opensprinkler-zone-expander/) ([buy EU](https://opensprinklershop.de/pl/shop/)) | ~€45 | +8 zones per board |
 | **Sprinklers** | [NDJ Flipper](https://www.ndjplast.pl/) micro-sprinklers (43 L/h) | varies | 24 per zone, great for frost protection |
 | **Pump** | Any pump matching your flow needs | varies | We use Omnigena 3T32 (60 L/min) + 200L buffer tank |
 | **Solenoid valves** | Hunter PGV-101 or similar 1" valves | ~€15 each | One per zone |
