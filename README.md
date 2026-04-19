@@ -303,6 +303,12 @@ clasp deploy --description "v1.0"
 
 MIT License. See [LICENSE](LICENSE) for details.
 
+## Built for Vineyards
+
+This system was originally built for [Winnica Pustkowie](https://winnicapustkowie.pl) (Pustkowie Vineyard, Poland) and is part of the [VineyardElf](https://vineyardelf.com) platform -- a suite of tools for vineyard monitoring and automation.
+
+If you grow grapes (or any frost-sensitive crops) and want help setting this up, feel free to open an issue or reach out.
+
 ## Acknowledgments
 
 - [OpenSprinkler](https://opensprinkler.com) by Ray Wang -- excellent open-source irrigation controller
