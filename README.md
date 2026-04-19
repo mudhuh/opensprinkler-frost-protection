@@ -12,7 +12,7 @@ When ground-level temperature drops below configurable thresholds, the system au
 - **Dual mode operation** -- switch between FROST mode (monitoring + auto-activation) and LAWN mode (daily scheduled irrigation)
 - **Cross-mode frost alerts** -- even in LAWN mode, the system monitors for frost risk and sends urgent alerts to switch valves
 - **Season guard** -- frost monitoring only active during configurable calendar season (default: April 1 -- June 14), with manual override
-- **Multi-channel notifications** -- Twilio WhatsApp, Twilio SMS, and SMSAPI.pl with automatic fallback chain
+- **Multi-channel notifications** -- Meta WhatsApp Business API (primary) with SMSAPI.pl SMS fallback
 - **Weather data logging** -- temperature, humidity, rainfall, wind, pressure, solar/UV to Google Sheets
 - **Powdery mildew risk tracking** -- monitors humidity + temperature conditions for disease risk
 - **Web control panel** -- mobile-friendly HTML panel for remote monitoring and control
@@ -28,7 +28,7 @@ Ecowitt Weather Station ──── Ecowitt Cloud API v3
                             Google Apps Script (Code.js)
                            /          |           \
                           v           v            v
-                   Google Sheets   OpenSprinkler   Twilio / SMSAPI
+                   Google Sheets   OpenSprinkler   Meta WhatsApp / SMSAPI
                    (data logs)     Cloud API       (alerts)
                                       |
                                       v
@@ -47,9 +47,11 @@ Ecowitt Weather Station ──── Ecowitt Cloud API v3
    - Ecowitt API v3 access (free, request at ecowitt.net)
 3. **Google Account** for Apps Script and Sheets
 4. **Notification service** (at least one):
-   - [Twilio](https://www.twilio.com) account (WhatsApp sandbox + SMS)
+   - [Meta WhatsApp Business API](https://developers.facebook.com/docs/whatsapp/cloud-api) (free test number, no sandbox expiry)
    - [SMSAPI.pl](https://www.smsapi.pl) account (or adapt `sendSMSAlert()` for your SMS provider)
-5. **[clasp](https://github.com/nicholaiii/clasp)** CLI (optional, for deployment from command line)
+   - [Twilio](https://www.twilio.com) (optional alternative -- code included but commented out)
+5. **[clasp](https://github.com/google/clasp)** CLI (optional, for deployment from command line)
+6. **[Claude Code](https://claude.ai/claude-code)** (optional but recommended -- see [Developing with Claude Code](#developing-with-claude-code) below)
 
 ## Setup Guide
 
@@ -86,15 +88,13 @@ Go to **Project Settings** (gear icon) > **Script Properties** and add:
 | `OPENSPRINKLER_OTC` | OpenSprinkler cloud token (from OS admin panel) | `abcdef1234` |
 | `OPENSPRINKLER_PASSWORD` | OpenSprinkler password (plain text -- hashed with MD5 in code) | `mypassword` |
 | `PANEL_SECRET` | Secret token for authenticated panel actions | `any-random-string` |
-| `SMSAPI_TOKEN` | SMSAPI.pl access token (optional) | `token123` |
-| `SMSAPI_RECIPIENTS` | SMS recipient numbers, comma-separated (optional) | `+48123456789` |
-| `TWILIO_SID` | Twilio Account SID (optional) | `AC...` |
-| `TWILIO_AUTH` | Twilio Auth Token (optional) | `auth...` |
-| `TWILIO_TO` | Your phone number for notifications | `+48123456789` |
-| `TWILIO_WHATSAPP_FROM` | Twilio WhatsApp sender (optional) | `whatsapp:+14155238886` |
-| `TWILIO_SMS_FROM` | Twilio SMS sender number (optional) | `+19876543210` |
+| `META_WHATSAPP_TOKEN` | Meta WhatsApp Business API token | `EAAw...` |
+| `META_WHATSAPP_PHONE_ID` | Phone number ID from Meta dashboard | `1234567890` |
+| `NOTIFICATION_TO` | WhatsApp recipients, comma-separated (country code, no +) | `48123456789,48987654321` |
+| `SMSAPI_TOKEN` | SMSAPI.pl access token (optional, SMS fallback) | `token123` |
+| `SMSAPI_RECIPIENTS` | SMS recipient numbers, comma-separated (optional) | `48123456789` |
 
-**Note:** You need at least one notification method (SMSAPI or Twilio). The system uses a fallback chain: WhatsApp -> Twilio SMS -> SMSAPI.pl.
+**Note:** You need at least one notification method. The system uses a fallback chain: Meta WhatsApp -> SMSAPI.pl SMS. See [Setting up Meta WhatsApp](#setting-up-meta-whatsapp) below.
 
 ### 4. Deploy as Web App
 
@@ -253,11 +253,15 @@ curl "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec?action=switchTo
 - Check the `frost_risk` sheet has enough data rows (minimum 3 readings)
 - Check Apps Script logs for `monitorFrostRiskAuto` output
 
-### SMS/WhatsApp not arriving
-- Verify Twilio credentials in Script Properties
-- For WhatsApp sandbox: you must first send the join message from your phone to the sandbox number
-- Sandbox sessions expire after 72 hours of inactivity -- the `keepAliveSandbox()` function handles this
-- Check Twilio dashboard for delivery status
+### WhatsApp not arriving
+- Verify `META_WHATSAPP_TOKEN` and `META_WHATSAPP_PHONE_ID` in Script Properties
+- With a test number: each recipient must first send a message TO the test number before they can receive messages
+- Test tokens expire after 24 hours -- generate a permanent System User token for production
+- Check Meta developer dashboard for delivery status
+
+### SMS not arriving
+- Verify `SMSAPI_TOKEN` and `SMSAPI_RECIPIENTS` in Script Properties
+- SMSAPI sends alerts about new IP addresses (Google's IPs change) -- this is normal, don't add IP filters
 
 ### Google Apps Script execution limits
 - GAS has a 6-minute execution time limit per function call
@@ -274,6 +278,148 @@ This system was originally built for a vineyard in Poland, but can be adapted fo
 4. **Change notification provider** -- replace `sendSMSAlert()` with your preferred SMS API, or remove SMS entirely and rely only on Twilio
 5. **Change weather station** -- if not using Ecowitt, replace `fetchWeatherData()` with your weather API; keep the same data structure or adapt the logging functions
 6. **Add/remove weather logging** -- the weather logging functions (rainfall, wind, pressure, etc.) are independent and can be removed if not needed
+
+## Setting up Meta WhatsApp
+
+Free WhatsApp notifications without Twilio sandbox hassle:
+
+1. **Create Meta Developer App**
+   - Go to [developers.facebook.com](https://developers.facebook.com) → **My Apps** → **Create App**
+   - Or use an existing app → **Add use cases** → **Connect with customers through WhatsApp**
+
+2. **Set up WhatsApp Business**
+   - Select your Business Portfolio (or create one)
+   - You'll get a **test phone number** (free, sends to up to 5 recipients for 90 days)
+
+3. **Get credentials**
+   - Go to **API Setup** in the WhatsApp section
+   - Copy the **Phone number ID** → set as `META_WHATSAPP_PHONE_ID`
+   - Click **Generate access token** → set as `META_WHATSAPP_TOKEN`
+
+4. **Add recipients**
+   - In **API Setup** → **To** → add phone numbers that should receive notifications
+   - Each recipient must **send a message first** to the test number (e.g., "hello") before they can receive messages
+
+5. **Test**
+   ```bash
+   curl -X POST "https://graph.facebook.com/v25.0/YOUR_PHONE_ID/messages" \
+     -H "Authorization: Bearer YOUR_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"messaging_product":"whatsapp","to":"48XXXXXXXXX","type":"text","text":{"body":"Test from sprinkler system!"}}'
+   ```
+
+6. **For production** (optional)
+   - Generate a **System User Token** (doesn't expire) in Meta Business Settings → System Users
+   - Register your own phone number instead of the test number
+   - Set a business profile name (e.g., "VineyardElf" or your vineyard name)
+
+## Developing with Claude Code
+
+This entire system was built and is maintained using [Claude Code](https://claude.ai/claude-code) -- Anthropic's AI coding assistant in the terminal. Here's how to use the same workflow for your OpenSprinkler setup:
+
+### Why Claude Code + Apps Script?
+
+- **No local runtime needed** -- code runs on Google's servers, Claude just writes and pushes it
+- **Instant iteration** -- describe what you want, Claude writes the code, `clasp push` deploys it, test immediately
+- **Complex integrations made easy** -- connecting OpenSprinkler + Ecowitt + WhatsApp + SMS would take days manually; Claude handles the API wiring
+- **Debug in real-time** -- paste GAS execution logs into Claude, get fixes immediately
+
+### Step-by-step workflow
+
+**1. Install tools**
+
+```bash
+# Install clasp (Google Apps Script CLI)
+npm install -g @google/clasp
+
+# Login to Google
+clasp login
+
+# Install Claude Code
+# See: https://claude.ai/claude-code
+```
+
+**2. Clone your GAS project locally**
+
+```bash
+# Find your script ID in the GAS editor URL or via:
+clasp list
+
+# Clone it
+mkdir my-sprinklers && cd my-sprinklers
+clasp clone YOUR_SCRIPT_ID
+```
+
+**3. Create a CLAUDE.md file**
+
+Create a `CLAUDE.md` in your project root. This tells Claude about your setup:
+
+```markdown
+# My Sprinkler System
+
+## Stack
+- Runtime: Google Apps Script (clasp deploy)
+- Controller: OpenSprinkler (cloud.openthings.io)
+- Weather: Ecowitt API v3
+- Notifications: Meta WhatsApp + SMSAPI
+
+## Deploy
+clasp push        # push code to GAS
+clasp deploy      # new deployment
+
+## Important
+- Code must be compatible with GAS runtime V8
+- No ES modules (import/export) -- GAS doesn't support them
+- No fetch() -- use UrlFetchApp.fetch() in GAS
+- console.log() → Logger.log()
+- Secrets in Script Properties, never in code
+
+## My zones
+- S01-S04: vineyard (frost protection)
+- S05-S08: lawn
+```
+
+**4. Start working with Claude**
+
+```bash
+# Start Claude Code in your project directory
+claude
+
+# Now just describe what you want:
+```
+
+**Example prompts you can use:**
+
+> "Add zone S09 to lawn watering schedule"
+
+> "Change frost threshold from 2°C to 1.5°C"
+
+> "Send me a test SMS through SMSAPI"
+
+> "The frost loop isn't stopping when temperature rises above 3°C -- here are the logs: [paste logs]"
+
+> "Add a new web API endpoint to manually run zones 1-4 for 5 minutes"
+
+> "Switch notifications from Twilio to Meta WhatsApp API"
+
+**5. Deploy changes**
+
+Claude will typically run `clasp push` and `clasp deploy` for you. If you want it to do this automatically after every code change, add to your `CLAUDE.md`:
+
+```markdown
+## After changes
+- Always run: clasp push && clasp deploy -d "description"
+- Commit and push to git
+```
+
+### Tips for working with Claude Code + GAS
+
+- **Paste error logs** directly from the GAS execution log -- Claude can diagnose issues from the stack trace
+- **Share your Script Properties list** (without values) so Claude knows what's configured
+- **Ask Claude to add debug logging** when something isn't working -- GAS logs are your best friend
+- **Let Claude handle the API plumbing** -- connecting Ecowitt, OpenSprinkler, and notification APIs is where it shines
+- **Use `clasp push`** not the GAS web editor -- this keeps your local files in sync and lets Claude work with them
+- **Keep a CLAUDE.md** updated with your zone layout, sensor setup, and any quirks -- this saves huge amounts of back-and-forth
 
 ## Using clasp for Deployment
 
