@@ -53,6 +53,17 @@ const LAWN_DURATION_MINUTES = 20;             // Watering time per lawn zone
 const LAWN_START_HOUR = 1;                    // Daily lawn watering start hour (1:00 AM)
 const LAWN_START_MINUTE = 0;
 
+// === Rain skip: don't water the lawn when it has rained (or is forecast to) ===
+const LAWN_RAIN_SKIP_DAILY_MM = 5;      // Skip if Ecowitt daily rainfall >= this (resets at midnight)
+const LAWN_RAIN_SKIP_EVENT_MM = 5;      // Skip if Ecowitt current rain-event total >= this.
+                                        // "event" does NOT reset at midnight (only after ~24h dry),
+                                        // so it catches yesterday-evening/overnight rain that "daily" misses.
+const LAWN_RAIN_SKIP_OPENMETEO_MM = 4;  // Skip if Open-Meteo rain (yesterday or today's forecast) >= this.
+                                        // Open-Meteo is an independent source — invaluable when the physical
+                                        // rain gauge is clogged/faulty and under-reports (a real failure mode).
+const VINEYARD_LAT = 52.13;             // Site coordinates for Open-Meteo (adjust to your location)
+const VINEYARD_LON = 22.22;
+
 // === API Keys from Script Properties ===
 const APPLICATION_KEY = PropertiesService.getScriptProperties().getProperty("ECOWITT_APPLICATION_KEY");
 const API_KEY = PropertiesService.getScriptProperties().getProperty("ECOWITT_API_KEY");
@@ -1399,12 +1410,101 @@ function removeLawnTriggers() {
 // LAWN WATERING
 // ============================================================
 
+// Fetch rainfall from Open-Meteo (free, no API key) — a source independent of the
+// local weather station. This matters because a physical rain gauge can get clogged
+// and under-report badly; the forecast model then becomes the only reliable rain signal.
+// Returns { yesterdayMm, todayForecastMm } or null on error.
+function fetchOpenMeteoRain() {
+  try {
+    const url = 'https://api.open-meteo.com/v1/forecast'
+      + '?latitude=' + VINEYARD_LAT
+      + '&longitude=' + VINEYARD_LON
+      + '&daily=precipitation_sum'
+      + '&past_days=1&forecast_days=1'
+      + '&timezone=auto';
+    const resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true, readTimeoutMillis: 20000 });
+    if (resp.getResponseCode() !== 200) {
+      Logger.log('fetchOpenMeteoRain: HTTP ' + resp.getResponseCode());
+      return null;
+    }
+    const data = JSON.parse(resp.getContentText());
+    const arr = (data.daily && data.daily.precipitation_sum) || [];
+    // past_days=1 + forecast_days=1 => [0] = yesterday (full day), [1] = today (forecast)
+    const yesterdayMm = arr.length > 0 ? (parseFloat(arr[0]) || 0) : 0;
+    const todayForecastMm = arr.length > 1 ? (parseFloat(arr[1]) || 0) : 0;
+    return { yesterdayMm: Math.round(yesterdayMm * 10) / 10, todayForecastMm: Math.round(todayForecastMm * 10) / 10 };
+  } catch (e) {
+    Logger.log('fetchOpenMeteoRain error: ' + e);
+    return null;
+  }
+}
+
+// Decide whether to skip lawn watering because of rain. Combines the local Ecowitt
+// gauge (current rate + rain-event total + daily total) with Open-Meteo (independent).
+// Returns true if watering should be skipped. Fails open (waters) if all sources error.
+function checkRainAndSkip() {
+  const reasons = [];
+
+  // 1. Ecowitt gauge (values in inches — convert to mm)
+  try {
+    const weather = fetchWeatherData();
+    if (weather && weather.rainfall) {
+      const inchToMm = (v) => Math.round(parseFloat(v ?? 0) * 25.4 * 10) / 10;
+      const rainRateInch = parseFloat(weather.rainfall.rain_rate?.value ?? 0);
+      const rateMm = inchToMm(rainRateInch);
+      const dailyMm = inchToMm(weather.rainfall.daily?.value);
+      const eventMm = inchToMm(weather.rainfall.event?.value);      // current rain event, no midnight reset
+      const hourMm = inchToMm(weather.rainfall['1_hour']?.value);
+
+      if (rainRateInch > 0) {
+        reasons.push(`Ecowitt: currently raining ${rateMm} mm/h`);
+      }
+      if (eventMm >= LAWN_RAIN_SKIP_EVENT_MM) {
+        reasons.push(`Ecowitt: rain event ${eventMm} mm (threshold ${LAWN_RAIN_SKIP_EVENT_MM} mm)`);
+      }
+      if (dailyMm >= LAWN_RAIN_SKIP_DAILY_MM) {
+        reasons.push(`Ecowitt: daily rainfall ${dailyMm} mm (threshold ${LAWN_RAIN_SKIP_DAILY_MM} mm)`);
+      }
+      Logger.log(`checkRainAndSkip Ecowitt: rate=${rateMm}mm/h event=${eventMm}mm daily=${dailyMm}mm 1h=${hourMm}mm`);
+    }
+  } catch (e) {
+    Logger.log('checkRainAndSkip: Ecowitt error: ' + e);
+  }
+
+  // 2. Open-Meteo (independent of the local gauge — catches rain even if the gauge is clogged)
+  try {
+    const om = fetchOpenMeteoRain();
+    if (om) {
+      Logger.log(`checkRainAndSkip Open-Meteo: yesterday=${om.yesterdayMm}mm today(forecast)=${om.todayForecastMm}mm`);
+      if (om.yesterdayMm >= LAWN_RAIN_SKIP_OPENMETEO_MM) {
+        reasons.push(`Open-Meteo: rain yesterday ${om.yesterdayMm} mm (threshold ${LAWN_RAIN_SKIP_OPENMETEO_MM} mm)`);
+      }
+      if (om.todayForecastMm >= LAWN_RAIN_SKIP_OPENMETEO_MM) {
+        reasons.push(`Open-Meteo: forecast today ${om.todayForecastMm} mm (threshold ${LAWN_RAIN_SKIP_OPENMETEO_MM} mm)`);
+      }
+    }
+  } catch (e) {
+    Logger.log('checkRainAndSkip: Open-Meteo error: ' + e);
+  }
+
+  if (reasons.length > 0) {
+    const msg = `🌧 Lawn watering skipped — ${reasons.join('; ')}`;
+    Logger.log(msg);
+    sendNotification(msg);
+    return true;
+  }
+  return false;
+}
+
 // Run lawn watering: zones sequentially, each for LAWN_DURATION_MINUTES
 function runLawnWatering() {
   if (getCurrentMode() !== 'lawn') {
     Logger.log("runLawnWatering: Not in lawn mode, skipping.");
     return;
   }
+
+  // Skip watering if it has rained (or is forecast to) — see checkRainAndSkip()
+  if (checkRainAndSkip()) return;
 
   Logger.log(`Lawn watering start: zones ${LAWN_ZONES.join(', ')}, ${LAWN_DURATION_MINUTES} min each.`);
 

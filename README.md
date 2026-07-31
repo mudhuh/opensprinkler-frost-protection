@@ -10,6 +10,7 @@ When ground-level temperature drops below configurable thresholds, the system au
 - **Trend-based early warning** -- analyzes temperature trend over recent readings, sends alerts before frost actually hits
 - **Zone pair cycling** -- runs zones in configurable pairs (water pressure typically cannot handle 3+ zones simultaneously), with automatic cycling and rechecks
 - **Dual mode operation** -- switch between FROST mode (monitoring + auto-activation) and LAWN mode (daily scheduled irrigation)
+- **Rain skip** -- skips lawn watering when it has rained (or is forecast to), using the Ecowitt gauge (current rate + rain-event total + daily total) **and Open-Meteo** as an independent cross-check -- so a clogged/faulty rain gauge can't silently keep watering through downpours
 - **Cross-mode frost alerts** -- even in LAWN mode, the system monitors for frost risk and sends urgent alerts to switch valves
 - **Season guard** -- frost monitoring only active during configurable calendar season (default: April 1 -- June 14), with manual override
 - **Multi-channel notifications** -- Meta WhatsApp Business API (primary) with SMSAPI.pl SMS fallback
