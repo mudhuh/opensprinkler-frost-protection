@@ -50,8 +50,11 @@ const FLIPPER_FLOW_RATE_LPH = 43;   // Flow rate per head in liters/hour
 // Switch via: switchToLawnMode() / switchToFrostMode() or web API
 const LAWN_ZONES = [5, 6, 8, 9, 10, 12];    // Lawn zone numbers (adjust to your setup)
 const LAWN_DURATION_MINUTES = 20;             // Watering time per lawn zone
-const LAWN_START_HOUR = 1;                    // Daily lawn watering start hour (1:00 AM)
+const LAWN_START_HOUR = 1;                    // Lawn watering start hour (1:00 AM)
 const LAWN_START_MINUTE = 0;
+// Watering frequency: null = every day, or a ScriptApp.WeekDay value for a weekly cycle
+// (e.g. ScriptApp.WeekDay.FRIDAY waters once a week, in the early hours of Friday).
+const LAWN_WATERING_WEEKDAY = null;
 
 // === Rain skip: don't water the lawn when it has rained (or is forecast to) ===
 const LAWN_RAIN_SKIP_DAILY_MM = 5;      // Skip if Ecowitt daily rainfall >= this (resets at midnight)
@@ -285,18 +288,53 @@ function doGet(e) {
   }
 
   // status: system status (no auth required)
+  // Watering history straight from the OpenSprinkler log (read-only, no token).
+  // Params: days=21 (how far back to look)
+  if (action === 'osLog') {
+    const days = parseInt(params.days || '21', 10);
+    const logs = fetchSprinklerLogData(days) || [];
+    let names = [];
+    try {
+      const pw = calculateMD5(OPENSPRINKLER_PASSWORD);
+      const jsUrl = `https://cloud.openthings.io/forward/v1/${OPENSPRINKLER_OTC}/js?pw=${pw}`;
+      const jsResp = UrlFetchApp.fetch(jsUrl, { muteHttpExceptions: true, readTimeoutMillis: 15000 });
+      if (jsResp.getResponseCode() === 200) names = JSON.parse(jsResp.getContentText()).snames || [];
+    } catch (e) { /* names are cosmetic — carry on without them */ }
+    const entries = logs.map(function(r) {
+      // OS log record: [program id, station index, duration in seconds, end timestamp]
+      // NOTE: the station index is 0-based (0 = station 1) and the timestamp is the
+      // controller's LOCAL time, not UTC — do not shift it by a timezone offset.
+      const sid = r[1];
+      return {
+        pid: r[0], station: (typeof sid === 'number' ? sid + 1 : sid),
+        name: (typeof sid === 'number' && names[sid]) ? names[sid] : ('S' + String(sid + 1)),
+        seconds: r[2], minutes: Math.round(r[2] / 60 * 10) / 10,
+        endLocal: Utilities.formatDate(new Date(r[3] * 1000), 'UTC', 'yyyy-MM-dd HH:mm:ss'),
+        endTimestamp: r[3]
+      };
+    });
+    return ContentService.createTextOutput(JSON.stringify({
+      ok: true, days: days, count: entries.length, entries: entries
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+
   if (action === 'status') {
     const mode = getCurrentMode();
     const loopActive = PropertiesService.getScriptProperties().getProperty('FROST_LOOP_ACTIVE') === 'true';
     const props = PropertiesService.getScriptProperties();
     const seasonOverride = props.getProperty('FROST_SEASON_MANUAL_OVERRIDE') === 'true';
     const irrigateActive = props.getProperty('IRRIGATE_ACTIVE') === 'true';
+    const lawnPausedUntil = props.getProperty('LAWN_PAUSED_UNTIL');
+    const lawnPaused = lawnPausedUntil ? new Date(lawnPausedUntil) > new Date() : false;
     const statusObj = {
       ok: true, mode: mode, frostLoopActive: loopActive,
       frostSeasonOverride: seasonOverride,
       frostPairs: FROST_PAIRS,
       lawnZones: LAWN_ZONES, lawnDuration: LAWN_DURATION_MINUTES,
-      lawnStartHour: LAWN_START_HOUR, timestamp: new Date().toISOString(),
+      lawnStartHour: LAWN_START_HOUR, lawnStartMinute: LAWN_START_MINUTE,
+      lawnWateringWeekday: LAWN_WATERING_WEEKDAY,
+      lawnPaused: lawnPaused, lawnPausedUntil: lawnPaused ? lawnPausedUntil : null,
+      timestamp: new Date().toISOString(),
       activeZones: [],
       irrigate: irrigateActive ? {
         active: true,
@@ -316,8 +354,8 @@ function doGet(e) {
         const osResp = UrlFetchApp.fetch(osUrl, { muteHttpExceptions: true, readTimeoutMillis: 15000 });
         if (osResp.getResponseCode() === 200) {
           const osData = JSON.parse(osResp.getContentText());
-          const sn = osData.sn || { sn: [] };
-          const stations = sn.sn || [];
+          // /js returns "sn" as a flat array of station states: [0, 1, 0, ...]
+          const stations = Array.isArray(osData.sn) ? osData.sn : [];
           const names = osData.snames || [];
           const active = [];
           for (let i = 0; i < stations.length; i++) {
@@ -327,6 +365,16 @@ function doGet(e) {
           }
           statusObj.activeZones = active;
           statusObj.totalZones = stations.length;
+        }
+        // Rain sensor state (optional — only some controllers/firmwares report it).
+        // It lives in /jc (controller variables) as sn1, not in /js.
+        const jcUrl = `https://cloud.openthings.io/forward/v1/${OPENSPRINKLER_OTC}/jc?pw=${pw}`;
+        const jcResp = UrlFetchApp.fetch(jcUrl, { muteHttpExceptions: true, readTimeoutMillis: 15000 });
+        if (jcResp.getResponseCode() === 200) {
+          const jcData = JSON.parse(jcResp.getContentText());
+          if (jcData.sn1 !== undefined) {
+            statusObj.rainSensor = { status: jcData.sn1, label: jcData.sn1 === 1 ? 'RAIN' : 'dry' };
+          }
         }
       }
     } catch (e) {
@@ -358,7 +406,53 @@ function doGet(e) {
       break;
     case 'stopLawn':
       removeLawnTriggers();
-      result.message = 'Lawn watering stopped.';
+      // Also switch the zones off on the controller — a zone already running
+      // would otherwise keep going until its timer expires.
+      try {
+        const pwStop = calculateMD5(OPENSPRINKLER_PASSWORD);
+        if (pwStop && OPENSPRINKLER_OTC) {
+          for (const zone of LAWN_ZONES) {
+            UrlFetchApp.fetch(`https://cloud.openthings.io/forward/v1/${OPENSPRINKLER_OTC}/cm?pw=${pwStop}&sid=${zone - 1}&en=0&t=0`, { muteHttpExceptions: true, readTimeoutMillis: 10000 });
+          }
+        }
+      } catch (e) { Logger.log('stopLawn OS error: ' + e); }
+      result.message = 'Lawn watering stopped (triggers + zones).';
+      break;
+    case 'pauseLawn':
+      // Temporary pause that resumes by itself — the triggers stay in place and
+      // simply skip while LAWN_PAUSED_UNTIL is in the future. Params: hours=24
+      var pauseHours = parseInt(params.hours || '24', 10);
+      var pauseUntilDate = new Date(new Date().getTime() + pauseHours * 3600 * 1000);
+      PropertiesService.getScriptProperties().setProperty('LAWN_PAUSED_UNTIL', pauseUntilDate.toISOString());
+      try {
+        var pwPause = calculateMD5(OPENSPRINKLER_PASSWORD);
+        if (pwPause && OPENSPRINKLER_OTC) {
+          for (var pz = 0; pz < LAWN_ZONES.length; pz++) {
+            UrlFetchApp.fetch(`https://cloud.openthings.io/forward/v1/${OPENSPRINKLER_OTC}/cm?pw=${pwPause}&sid=${LAWN_ZONES[pz] - 1}&en=0&t=0`, { muteHttpExceptions: true, readTimeoutMillis: 10000 });
+          }
+        }
+      } catch (e) { Logger.log('pauseLawn OS error: ' + e); }
+      result.message = `Lawn watering paused for ${pauseHours}h (until ${pauseUntilDate.toISOString()}).`;
+      sendNotification(result.message);
+      break;
+    case 'resumeLawn':
+      PropertiesService.getScriptProperties().deleteProperty('LAWN_PAUSED_UNTIL');
+      // Recreate the triggers if they went missing (e.g. cleared while paused)
+      var hasLawnTrigger = ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'runLawnWatering');
+      if (!hasLawnTrigger) switchToLawnMode();
+      result.message = 'Lawn watering resumed.';
+      break;
+    case 'refreshLawn':
+      // Rebuild the lawn triggers from the current code. Needed after changing the
+      // schedule: a trigger stores its own schedule, so pushing new code is not enough.
+      switchToLawnMode();
+      result.message = 'Lawn triggers rebuilt.';
+      break;
+    case 'listTriggers':
+      result.triggers = ScriptApp.getProjectTriggers().map(t => ({
+        fn: t.getHandlerFunction(), type: t.getEventType().toString(), id: t.getUniqueId()
+      }));
+      result.message = 'Project triggers.';
       break;
     case 'stopAll':
       stopFrostProtection();
@@ -1364,16 +1458,25 @@ function switchToLawnMode() {
   props.setProperty('SYSTEM_MODE', 'lawn');
   removeLawnTriggers();
 
-  // Create daily lawn watering trigger
-  ScriptApp.newTrigger('runLawnWatering')
+  // Create the lawn watering trigger — weekly if LAWN_WATERING_WEEKDAY is set, daily otherwise
+  const builder = ScriptApp.newTrigger('runLawnWatering')
     .timeBased()
     .atHour(LAWN_START_HOUR)
-    .nearMinute(LAWN_START_MINUTE)
-    .everyDays(1)
-    .create();
+    .nearMinute(LAWN_START_MINUTE);
+  if (LAWN_WATERING_WEEKDAY) {
+    builder.onWeekDay(LAWN_WATERING_WEEKDAY);
+  } else {
+    builder.everyDays(1);
+  }
+  builder.create();
 
-  Logger.log(`Switched to LAWN mode. Daily at ${LAWN_START_HOUR}:${String(LAWN_START_MINUTE).padStart(2,'0')}, zones: ${LAWN_ZONES.join(', ')}, ${LAWN_DURATION_MINUTES} min each.`);
-  sendNotification(`LAWN mode active. Daily at ${LAWN_START_HOUR}:00, zones ${LAWN_ZONES.join(', ')}, ${LAWN_DURATION_MINUTES} min each.`);
+  const schedule = LAWN_WATERING_WEEKDAY ? 'Weekly' : 'Daily';
+  const endMinutes = LAWN_START_MINUTE + LAWN_ZONES.length * LAWN_DURATION_MINUTES;
+  const endH = LAWN_START_HOUR + Math.floor(endMinutes / 60);
+  const endM = endMinutes % 60;
+  const msg = `LAWN mode active. ${schedule} at ${LAWN_START_HOUR}:${String(LAWN_START_MINUTE).padStart(2,'0')}-~${endH}:${String(endM).padStart(2,'0')}, zones ${LAWN_ZONES.join(', ')}, ${LAWN_DURATION_MINUTES} min each. Skipped when it rains.`;
+  Logger.log(msg);
+  sendNotification(msg);
 }
 
 // Switch to FROST mode
@@ -1497,11 +1600,28 @@ function checkRainAndSkip() {
 }
 
 // Run lawn watering: zones sequentially, each for LAWN_DURATION_MINUTES
+// Returns true while a manual pause is in effect. An expired pause is cleared
+// automatically, so watering resumes on its own without any further action.
+function isLawnPaused() {
+  const props = PropertiesService.getScriptProperties();
+  const pausedUntil = props.getProperty('LAWN_PAUSED_UNTIL');
+  if (!pausedUntil) return false;
+  if (new Date() < new Date(pausedUntil)) {
+    Logger.log(`Lawn watering paused until ${pausedUntil}. Skipping.`);
+    return true;
+  }
+  props.deleteProperty('LAWN_PAUSED_UNTIL');
+  Logger.log("Lawn pause expired — resuming.");
+  return false;
+}
+
 function runLawnWatering() {
   if (getCurrentMode() !== 'lawn') {
     Logger.log("runLawnWatering: Not in lawn mode, skipping.");
     return;
   }
+
+  if (isLawnPaused()) return;
 
   // Skip watering if it has rained (or is forecast to) — see checkRainAndSkip()
   if (checkRainAndSkip()) return;
@@ -1558,6 +1678,12 @@ function runLawnWatering() {
 function runLawnZoneSequence() {
   if (getCurrentMode() !== 'lawn') {
     Logger.log("runLawnZoneSequence: Not in lawn mode, skipping.");
+    removeLawnTriggers();
+    return;
+  }
+
+  // A pause started mid-cycle must stop the remaining zones too
+  if (isLawnPaused()) {
     removeLawnTriggers();
     return;
   }

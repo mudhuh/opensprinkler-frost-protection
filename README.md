@@ -148,8 +148,31 @@ const FROST_PAIR_GAP_SECONDS = 15;               // Gap between pairs
 ```javascript
 const LAWN_ZONES = [5, 6, 8, 9, 10, 12];   // Which zones to water
 const LAWN_DURATION_MINUTES = 20;             // Minutes per zone
-const LAWN_START_HOUR = 1;                    // 1:00 AM daily
+const LAWN_START_HOUR = 1;                    // Start at 1:00 AM
+const LAWN_START_MINUTE = 0;
+const LAWN_WATERING_WEEKDAY = null;           // null = every day
 ```
+
+Zones run one after another, so the cycle ends roughly
+`LAWN_START_HOUR + LAWN_ZONES.length * LAWN_DURATION_MINUTES` later — check that it
+finishes before you want to be outside.
+
+For a weekly cycle instead of a daily one, set a weekday:
+
+```javascript
+const LAWN_WATERING_WEEKDAY = ScriptApp.WeekDay.FRIDAY;  // once a week, early Friday
+```
+
+**After changing the schedule, run `?action=refreshLawn&token=X`.** A Google Apps Script
+trigger stores its own schedule, so pushing new code does not change an existing trigger —
+it has to be deleted and recreated.
+
+#### Pausing without losing the schedule
+
+`?action=pauseLawn&hours=48&token=X` skips watering for a while (going away, fixing a pipe,
+guests on the lawn) and switches off any zone currently running. The triggers stay in place
+and watering resumes by itself when the pause expires — or immediately with
+`?action=resumeLawn&token=X`.
 
 ### Frost Season Calendar
 
@@ -212,13 +235,18 @@ The deployed web app exposes these endpoints:
 |---|---|---|---|
 | `?action=status` | No | GET | System status, active zones, mode |
 | `?action=programs` | No | GET | List OpenSprinkler programs |
+| `?action=osLog&days=21` | No | GET | Watering history from the controller log |
 | `?action=runZones&zones=1,2&duration=60` | No | GET | Manually run zones (testing) |
 | `?action=switchToFrost&token=X` | Yes | GET | Switch to frost mode |
 | `?action=switchToLawn&token=X` | Yes | GET | Switch to lawn mode |
 | `?action=startFrostLoop&token=X` | Yes | GET | Manually start frost loop |
 | `?action=stopAll&token=X` | Yes | GET | Emergency stop all |
 | `?action=testLawn&token=X` | Yes | GET | Run lawn watering once |
-| `?action=stopLawn&token=X` | Yes | GET | Stop lawn watering |
+| `?action=stopLawn&token=X` | Yes | GET | Stop lawn watering (triggers + zones) |
+| `?action=pauseLawn&hours=48&token=X` | Yes | GET | Pause watering, auto-resumes after N hours |
+| `?action=resumeLawn&token=X` | Yes | GET | Cancel the pause and resume |
+| `?action=refreshLawn&token=X` | Yes | GET | Rebuild lawn triggers after a schedule change |
+| `?action=listTriggers&token=X` | Yes | GET | List the project's triggers |
 | `?action=enableFrostSeason&token=X` | Yes | GET | Enable frost season override |
 | `?action=disableFrostSeason&token=X` | Yes | GET | Disable frost season override |
 | `?action=irrigateVineyard&minutes=10` | No | GET | Irrigate vineyard in pairs |
@@ -228,6 +256,9 @@ The deployed web app exposes these endpoints:
 ```bash
 # Get status
 curl "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec?action=status"
+
+# What actually ran over the last three weeks
+curl "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec?action=osLog&days=21"
 
 # Switch to frost mode
 curl "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec?action=switchToFrost&token=YOUR_SECRET"
@@ -260,6 +291,16 @@ curl "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec?action=switchTo
 ### SMS not arriving
 - Verify `SMSAPI_TOKEN` and `SMSAPI_RECIPIENTS` in Script Properties
 - SMSAPI sends alerts about new IP addresses (Google's IPs change) -- this is normal, don't add IP filters
+
+### Watering log looks wrong (shifted times, off-by-one zones)
+
+Two quirks of the OpenSprinkler log (`/jl`, exposed here as `?action=osLog`):
+
+- The station index is **0-based** — `1` in the log is station 2.
+- The end timestamp is the **controller's local time**, not UTC. Converting it from UTC
+  shifts every entry by your timezone offset.
+
+`osLog` already accounts for both and returns `station` (1-based) and `endLocal`.
 
 ### Google Apps Script execution limits
 - GAS has a 6-minute execution time limit per function call
